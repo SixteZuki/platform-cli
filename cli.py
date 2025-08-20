@@ -206,7 +206,7 @@ def list(ctx):
 
 @route53.command()
 @click.option("--zone", required=True, help="Domain name")
-@click.option("--action", required=True, type=click.Choice(["create", "delete", "update", "upsert"]))
+@click.option("--action", required=True, type=click.Choice(["create", "delete", "update"]))
 @click.option("--type", required=True, help="Record type (A, CNAME, etc.)")
 @click.option("--name", required=True, help="Record name (e.g. test.example.com)")
 @click.option("--value", help="Record value (for create/update)")
@@ -224,9 +224,16 @@ def record(ctx, zone, action, type, name, value):
         "Name": name,
         "Type": type,
     }
-    if action in ["create", "update", "upsert"]:
+    if action in ["create", "delete", "update"]:
         rr["TTL"] = 300
         rr["ResourceRecords"] = [{"Value": value}]
+
+    # Translate "update" → "UPSERT"
+    if action.lower() == "update":
+        action = "UPSERT"
+    else:
+        action = action.upper()
+
 
     r53.change_resource_record_sets(
         HostedZoneId=zid,

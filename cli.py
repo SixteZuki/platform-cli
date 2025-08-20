@@ -1,188 +1,239 @@
-import streamlit as st
+import click
 import boto3
-import pandas as pd
+import uuid
 
-# === Page setup ===
-st.set_page_config(page_title="Yuval Tzuckerman AWS Manager", layout="wide")
-st.markdown("<h1 style='color:#4CAF50; text-align:center;'>🚀 Yuval Tzuckerman AWS Manager</h1>", unsafe_allow_html=True)
-st.write("A stylish dashboard to manage EC2, S3 and Route53 resources created with the CLI.")
+# =========================
+# Helper: get boto3 client
+# =========================
+def get_client(service, profile, region):
+    session = boto3.Session(profile_name=profile, region_name=region)
+    return session.client(service)
 
-# AWS session
-session = boto3.Session(profile_name="dev")
-ec2 = session.client("ec2")
-s3 = session.client("s3")
-r53 = session.client("route53")
 
-# Sidebar navigation
-st.sidebar.title("📌 Navigation")
-service = st.sidebar.radio("Choose service", ["💻 EC2", "📦 S3", "🌍 Route53"])
+# =========================
+# Main CLI group
+# =========================
+@click.group()
+@click.option("--profile", required=True, help="AWS profile to use")
+@click.option("--region", default="us-east-1", help="AWS region")
+@click.option("--owner", required=True, help="Owner tag for filtering resources")
+@click.pass_context
+def cli(ctx, profile, region, owner):
+    """Platform CLI for managing AWS resources"""
+    ctx.ensure_object(dict)
+    ctx.obj["profile"] = profile
+    ctx.obj["region"] = region
+    ctx.obj["owner"] = owner
 
-# ================= EC2 =================
-if service == "💻 EC2":
-    st.markdown("<h2 style='color:#2196F3;'>💻 EC2 Instances</h2>", unsafe_allow_html=True)
 
-    if st.button("📋 List Instances"):
-        resp = ec2.describe_instances(Filters=[{"Name": "tag:Owner", "Values": ["yuval"]}])
-        data = []
-        for r in resp["Reservations"]:
-            for inst in r["Instances"]:
-                name_tag = next((t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), "")
-                data.append({
-                    "InstanceId": inst["InstanceId"],
-                    "Name": name_tag,
-                    "State": inst["State"]["Name"],
-                    "Type": inst["InstanceType"]
-                })
-        if data:
-            st.dataframe(pd.DataFrame(data), use_container_width=True)
-        else:
-            st.warning("⚠️ No instances found with Owner=yuval")
+# =========================
+# EC2 Commands
+# =========================
+@cli.group()
+@click.pass_context
+def ec2(ctx):
+    """Manage EC2 instances"""
+    pass
 
-    st.divider()
 
-    # Create instance
-    with st.form("create_ec2", clear_on_submit=True):
-        st.subheader("🆕 Create Instance")
-        instance_type = st.selectbox("Instance Type", ["t3.micro", "t3.small"])
-        instance_name = st.text_input("Instance Name (optional)")
-        submitted = st.form_submit_button("Create Instance")
-        if submitted:
-            ami = session.client("ssm").get_parameter(
-                Name="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64"
-            )["Parameter"]["Value"]
-            tags = [
+@ec2.command()
+@click.pass_context
+def list(ctx):
+    """List EC2 instances"""
+    ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
+    resp = ec2.describe_instances(
+        Filters=[{"Name": "tag:Owner", "Values": [ctx.obj["owner"]]}]
+    )
+    for r in resp["Reservations"]:
+        for inst in r["Instances"]:
+            state = inst["State"]["Name"]
+            inst_type = inst["InstanceType"]
+            inst_id = inst["InstanceId"]
+            ip = inst.get("PublicIpAddress", "N/A")
+            print(f"{inst_id} {state} {inst_type} {ip}")
+
+
+@ec2.command()
+@click.option("--type", default="t3.micro", help="Instance type")
+@click.option("--os", default="amazon-linux", help="OS type")
+@click.pass_context
+def create(ctx, type, os):
+    """Create a new EC2 instance"""
+    ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
+    ami_map = {
+        "amazon-linux": "ami-0c02fb55956c7d316",  # Amazon Linux 2 (us-east-1)
+        "ubuntu": "ami-08c40ec9ead489470",        # Ubuntu 20.04 LTS (us-east-1)
+    }
+    ami = ami_map.get(os, ami_map["amazon-linux"])
+    resp = ec2.run_instances(
+        ImageId=ami,
+        InstanceType=type,
+        MinCount=1,
+        MaxCount=1,
+        TagSpecifications=[
+            {
+                "ResourceType": "instance",
+                "Tags": [
+                    {"Key": "Owner", "Value": ctx.obj["owner"]},
+                    {"Key": "CreatedBy", "Value": "platform-cli"},
+                ],
+            }
+        ],
+    )
+    inst_id = resp["Instances"][0]["InstanceId"]
+    print(f"Created {inst_id}")
+
+
+@ec2.command()
+@click.argument("instance_id")
+@click.pass_context
+def stop(ctx, instance_id):
+    """Stop an EC2 instance"""
+    ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
+    ec2.stop_instances(InstanceIds=[instance_id])
+    print(f"Stopped {instance_id}")
+
+
+@ec2.command()
+@click.argument("instance_id")
+@click.pass_context
+def start(ctx, instance_id):
+    """Start an EC2 instance"""
+    ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
+    ec2.start_instances(InstanceIds=[instance_id])
+    print(f"Started {instance_id}")
+
+
+@ec2.command()
+@click.argument("instance_id")
+@click.pass_context
+def terminate(ctx, instance_id):
+    """Terminate an EC2 instance"""
+    ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
+    ec2.terminate_instances(InstanceIds=[instance_id])
+    print(f"Terminated {instance_id}")
+
+
+# =========================
+# S3 Commands
+# =========================
+@cli.group()
+@click.pass_context
+def s3(ctx):
+    """Manage S3 buckets"""
+    pass
+
+
+@s3.command()
+@click.option("--name", required=True, help="Bucket name")
+@click.pass_context
+def create(ctx, name):
+    """Create a new S3 bucket"""
+    s3 = get_client("s3", ctx.obj["profile"], ctx.obj["region"])
+    bucket_name = f"{name}-{uuid.uuid4().hex[:8]}"
+    s3.create_bucket(Bucket=bucket_name)
+    s3.put_bucket_tagging(
+        Bucket=bucket_name,
+        Tagging={
+            "TagSet": [
+                {"Key": "Owner", "Value": ctx.obj["owner"]},
                 {"Key": "CreatedBy", "Value": "platform-cli"},
-                {"Key": "Owner", "Value": "yuval"},
-                {"Key": "Project", "Value": "final-exam"},
-                {"Key": "Environment", "Value": "dev"}
             ]
-            if instance_name:
-                tags.append({"Key": "Name", "Value": instance_name})
+        },
+    )
+    print(f"bucket created: {bucket_name}")
 
-            inst = ec2.run_instances(
-                ImageId=ami,
-                InstanceType=instance_type,
-                MinCount=1,
-                MaxCount=1,
-                TagSpecifications=[{"ResourceType": "instance", "Tags": tags}]
-            )
-            st.success(f"✅ Created {inst['Instances'][0]['InstanceId']} ({instance_name or 'no name'})")
 
-    st.divider()
+@s3.command()
+@click.pass_context
+def list(ctx):
+    """List S3 buckets"""
+    s3 = get_client("s3", ctx.obj["profile"], ctx.obj["region"])
+    resp = s3.list_buckets()
+    for b in resp["Buckets"]:
+        print(b["Name"])
 
-    # Manage instance
-    st.subheader("⚙️ Manage Instance")
-    instance_id = st.text_input("Instance ID")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("▶️ Start") and instance_id:
-            ec2.start_instances(InstanceIds=[instance_id])
-            st.info(f"Started {instance_id}")
-    with col2:
-        if st.button("⏸️ Stop") and instance_id:
-            ec2.stop_instances(InstanceIds=[instance_id])
-            st.warning(f"Stopped {instance_id}")
-    with col3:
-        if st.button("🗑️ Terminate") and instance_id:
-            ec2.terminate_instances(InstanceIds=[instance_id])
-            st.error(f"Terminated {instance_id}")
 
-# ================= S3 =================
-elif service == "📦 S3":
-    st.markdown("<h2 style='color:#FF9800;'>📦 S3 Buckets</h2>", unsafe_allow_html=True)
+@s3.command()
+@click.option("--name", required=True, help="Bucket name")
+@click.option("--file", required=True, help="File to upload")
+@click.pass_context
+def upload(ctx, name, file):
+    """Upload file to S3"""
+    s3 = get_client("s3", ctx.obj["profile"], ctx.obj["region"])
+    key = file.split("/")[-1]
+    s3.upload_file(file, name, key)
+    print(f"uploaded {file} to {name}")
 
-    # List buckets
-    if st.button("📋 List Buckets"):
-        resp = s3.list_buckets()
-        names = [b["Name"] for b in resp["Buckets"]]
-        if names:
-            st.table(pd.DataFrame(names, columns=["Bucket Name"]))
-        else:
-            st.warning("⚠️ No buckets found")
 
-    st.divider()
+# =========================
+# Route53 Commands
+# =========================
+@cli.group()
+@click.pass_context
+def route53(ctx):
+    """Manage Route53"""
+    pass
 
-    # Create bucket
-    with st.form("create_bucket", clear_on_submit=True):
-        st.subheader("🆕 Create Bucket")
-        bucket_name = st.text_input("Bucket Name")
-        submitted = st.form_submit_button("Create Bucket")
-        if submitted and bucket_name:
-            s3.create_bucket(Bucket=bucket_name)
-            st.success(f"✅ Bucket {bucket_name} created")
 
-    st.divider()
+@route53.command()
+@click.option("--name", required=True, help="Domain name (e.g. example.com)")
+@click.pass_context
+def create_zone(ctx, name):
+    """Create hosted zone"""
+    r53 = get_client("route53", ctx.obj["profile"], ctx.obj["region"])
+    resp = r53.create_hosted_zone(
+        Name=name,
+        CallerReference=str(uuid.uuid4()),
+        HostedZoneConfig={
+            "Comment": f"Zone for {ctx.obj['owner']}",
+            "PrivateZone": False,
+        },
+    )
+    zid = resp["HostedZone"]["Id"].split("/")[-1]
+    print(f"{name} {zid}")
 
-    # Upload file
-    uploaded_file = st.file_uploader("📤 Upload file to a bucket")
-    bucket_target = st.text_input("Target bucket name")
-    if uploaded_file and bucket_target:
-        if st.button("Upload File"):
-            s3.upload_fileobj(uploaded_file, bucket_target, uploaded_file.name)
-            st.success(f"✅ Uploaded {uploaded_file.name} to {bucket_target}")
 
-# ================= Route53 =================
-elif service == "🌍 Route53":
-    st.markdown("<h2 style='color:#9C27B0;'>🌍 Route53 DNS</h2>", unsafe_allow_html=True)
+@route53.command()
+@click.pass_context
+def list(ctx):
+    """List hosted zones"""
+    r53 = get_client("route53", ctx.obj["profile"], ctx.obj["region"])
+    resp = r53.list_hosted_zones()
+    for z in resp["HostedZones"]:
+        print(f"{z['Name']} {z['Id'].split('/')[-1]}")
 
-    # List zones
-    if st.button("📋 List Hosted Zones"):
-        zones = r53.list_hosted_zones()
-        data = [{"Name": z["Name"], "Id": z["Id"]} for z in zones["HostedZones"]]
-        if data:
-            st.dataframe(pd.DataFrame(data), use_container_width=True)
-        else:
-            st.warning("⚠️ No hosted zones found")
 
-    st.divider()
+@route53.command()
+@click.option("--zone", required=True, help="Domain name")
+@click.option("--action", required=True, type=click.Choice(["create", "delete", "update", "upsert"]))
+@click.option("--type", required=True, help="Record type (A, CNAME, etc.)")
+@click.option("--name", required=True, help="Record name (e.g. test.example.com)")
+@click.option("--value", help="Record value (for create/update)")
+@click.pass_context
+def record(ctx, zone, action, type, name, value):
+    """Manage DNS records"""
+    r53 = get_client("route53", ctx.obj["profile"], ctx.obj["region"])
+    zones = r53.list_hosted_zones_by_name(DNSName=zone)["HostedZones"]
+    if not zones:
+        print("Zone not found")
+        return
+    zid = zones[0]["Id"].split("/")[-1]
 
-    # Manage record
-    with st.form("dns_record", clear_on_submit=True):
-        st.subheader("📝 Manage DNS Record")
-        zone = st.text_input("Zone (example: yuvalz-test.com)")
-        action = st.selectbox("Action", ["create", "update", "delete"])
-        record_type = st.selectbox("Type", ["A", "CNAME", "TXT"])
-        record_name = st.text_input("Record Name (example: test.yuvalz-test.com)")
-        record_value = st.text_input("Record Value (for create/update)")
+    rr = {
+        "Name": name,
+        "Type": type,
+    }
+    if action in ["create", "update", "upsert"]:
+        rr["TTL"] = 300
+        rr["ResourceRecords"] = [{"Value": value}]
 
-        submitted = st.form_submit_button("Apply Change")
-        if submitted and zone and record_name:
-            zid = None
-            for z in r53.list_hosted_zones()["HostedZones"]:
-                if z["Name"].rstrip(".") == zone.rstrip("."):
-                    zid = z["Id"]
-                    break
-            if not zid:
-                st.error("❌ Zone not found")
-            else:
-                if action == "delete":
-                    records = r53.list_resource_record_sets(HostedZoneId=zid)
-                    target = None
-                    for rec in records["ResourceRecordSets"]:
-                        if rec["Name"].rstrip(".") == record_name.rstrip(".") and rec["Type"] == record_type:
-                            target = rec
-                            break
-                    if not target:
-                        st.error("❌ Record not found")
-                    else:
-                        rr = {
-                            "Name": target["Name"],
-                            "Type": target["Type"],
-                            "TTL": target["TTL"],
-                            "ResourceRecords": target["ResourceRecords"]
-                        }
-                        act = "DELETE"
-                else:
-                    rr = {
-                        "Name": record_name,
-                        "Type": record_type,
-                        "TTL": 300,
-                        "ResourceRecords": [{"Value": record_value}]
-                    }
-                    act = "CREATE" if action == "create" else "UPSERT"
+    r53.change_resource_record_sets(
+        HostedZoneId=zid,
+        ChangeBatch={"Changes": [{"Action": action.upper(), "ResourceRecordSet": rr}]},
+    )
+    print(f"record {action.upper()} {type} {name} -> {value if value else ''}")
 
-                r53.change_resource_record_sets(
-                    HostedZoneId=zid,
-                    ChangeBatch={"Changes": [{"Action": act, "ResourceRecordSet": rr}]}
-                )
-                st.success(f"✅ Record {act} {record_type} {record_name} -> {record_value or ''}")
+
+if __name__ == "__main__":
+    cli()

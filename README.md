@@ -77,4 +77,4 @@ streamlit run app.py
 ```
 # 📂 Demo Evidence
 
-For detailed demo evidence, see For full CLI usage evidence and run results, see [DEMO.md](https://github.com/SixteZuki/platform-cli/blob/main/DEMO.md)
+For detailed demo evidence [DEMO.md](https://github.com/SixteZuki/platform-cli/blob/main/DEMO.md)

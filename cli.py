@@ -12,7 +12,6 @@ def get_client(service, profile, region):
 @click.option("--owner", required=True, help="Owner tag for filtering resources")
 @click.pass_context
 def cli(ctx, profile, region, owner):
-    """Platform CLI for managing AWS resources"""
     ctx.ensure_object(dict)
     ctx.obj["profile"] = profile
     ctx.obj["region"] = region
@@ -21,13 +20,11 @@ def cli(ctx, profile, region, owner):
 @cli.group()
 @click.pass_context
 def ec2(ctx):
-    """Manage EC2 instances"""
     pass
 
 @ec2.command()
 @click.pass_context
 def list(ctx):
-    """List EC2 instances"""
     ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
     resp = ec2.describe_instances(
         Filters=[{"Name": "tag:Owner", "Values": [ctx.obj["owner"]]}]
@@ -45,13 +42,16 @@ def list(ctx):
 @click.option("--os", default="amazon-linux", help="OS type")
 @click.pass_context
 def create(ctx, type, os):
-    """Create a new EC2 instance"""
     ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
-    ami_map = {
-        "amazon-linux": "ami-0c02fb55956c7d316",  # Amazon Linux 2 (us-east-1)
-        "ubuntu": "ami-08c40ec9ead489470",        # Ubuntu 20.04 LTS (us-east-1)
+    ssm = get_client("ssm", ctx.obj["profile"], ctx.obj["region"])
+    ami_params = {
+         "amazon-linux": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64",
+        "ubuntu": "/aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id",
     }
-    ami = ami_map.get(os, ami_map["amazon-linux"])
+
+    param_name = ami_params[os]
+    ami = ssm.get_parameter(Name=param_name)["Parameter"]["Value"]
+
     resp = ec2.run_instances(
         ImageId=ami,
         InstanceType=type,
@@ -74,7 +74,6 @@ def create(ctx, type, os):
 @click.argument("instance_id")
 @click.pass_context
 def stop(ctx, instance_id):
-    """Stop an EC2 instance"""
     ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
     ec2.stop_instances(InstanceIds=[instance_id])
     print(f"Stopped {instance_id}")
@@ -83,7 +82,6 @@ def stop(ctx, instance_id):
 @click.argument("instance_id")
 @click.pass_context
 def start(ctx, instance_id):
-    """Start an EC2 instance"""
     ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
     ec2.start_instances(InstanceIds=[instance_id])
     print(f"Started {instance_id}")
@@ -92,7 +90,6 @@ def start(ctx, instance_id):
 @click.argument("instance_id")
 @click.pass_context
 def terminate(ctx, instance_id):
-    """Terminate an EC2 instance"""
     ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
     ec2.terminate_instances(InstanceIds=[instance_id])
     print(f"Terminated {instance_id}")
@@ -100,14 +97,12 @@ def terminate(ctx, instance_id):
 @cli.group()
 @click.pass_context
 def s3(ctx):
-    """Manage S3 buckets"""
     pass
 
 @s3.command()
 @click.option("--name", required=True, help="Bucket name")
 @click.pass_context
 def create(ctx, name):
-    """Create a new S3 bucket"""
     s3 = get_client("s3", ctx.obj["profile"], ctx.obj["region"])
     bucket_name = f"{name}-{uuid.uuid4().hex[:8]}"
     s3.create_bucket(Bucket=bucket_name)
@@ -125,7 +120,6 @@ def create(ctx, name):
 @s3.command()
 @click.pass_context
 def list(ctx):
-    """List S3 buckets"""
     s3 = get_client("s3", ctx.obj["profile"], ctx.obj["region"])
     resp = s3.list_buckets()
     for b in resp["Buckets"]:
@@ -136,7 +130,6 @@ def list(ctx):
 @click.option("--file", required=True, help="File to upload")
 @click.pass_context
 def upload(ctx, name, file):
-    """Upload file to S3"""
     s3 = get_client("s3", ctx.obj["profile"], ctx.obj["region"])
     key = file.split("/")[-1]
     s3.upload_file(file, name, key)
@@ -145,14 +138,12 @@ def upload(ctx, name, file):
 @cli.group()
 @click.pass_context
 def route53(ctx):
-    """Manage Route53"""
     pass
 
 @route53.command()
 @click.option("--name", required=True, help="Domain name (e.g. example.com)")
 @click.pass_context
 def create_zone(ctx, name):
-    """Create hosted zone"""
     r53 = get_client("route53", ctx.obj["profile"], ctx.obj["region"])
     resp = r53.create_hosted_zone(
         Name=name,
@@ -168,7 +159,6 @@ def create_zone(ctx, name):
 @route53.command()
 @click.pass_context
 def list(ctx):
-    """List hosted zones"""
     r53 = get_client("route53", ctx.obj["profile"], ctx.obj["region"])
     resp = r53.list_hosted_zones()
     for z in resp["HostedZones"]:
@@ -182,7 +172,6 @@ def list(ctx):
 @click.option("--value", help="Record value (for create/update)")
 @click.pass_context
 def record(ctx, zone, action, type, name, value):
-    """Manage DNS records"""
     r53 = get_client("route53", ctx.obj["profile"], ctx.obj["region"])
     zones = r53.list_hosted_zones_by_name(DNSName=zone)["HostedZones"]
     if not zones:
@@ -203,13 +192,11 @@ def record(ctx, zone, action, type, name, value):
     else:
         action = action.upper()
 
-
     r53.change_resource_record_sets(
         HostedZoneId=zid,
         ChangeBatch={"Changes": [{"Action": action.upper(), "ResourceRecordSet": rr}]},
     )
     print(f"record {action.upper()} {type} {name} -> {value if value else ''}")
-
 
 if __name__ == "__main__":
     cli()

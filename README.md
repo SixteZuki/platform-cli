@@ -75,3 +75,6 @@ To avoid unwanted charges you should clean up the resources created by this CLI.
 pip install streamlit
 streamlit run app.py
 ```
+# 📂 Demo Evidence
+
+For detailed demo evidence, see For full CLI usage evidence and run results, see [DEMO.md](https://github.com/SixteZuki/platform-cli/blob/main/DEMO.md)

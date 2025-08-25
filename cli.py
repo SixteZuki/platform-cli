@@ -2,17 +2,10 @@ import click
 import boto3
 import uuid
 
-# =========================
-# Helper: get boto3 client
-# =========================
 def get_client(service, profile, region):
     session = boto3.Session(profile_name=profile, region_name=region)
     return session.client(service)
 
-
-# =========================
-# Main CLI group
-# =========================
 @click.group()
 @click.option("--profile", required=True, help="AWS profile to use")
 @click.option("--region", default="us-east-1", help="AWS region")
@@ -25,16 +18,11 @@ def cli(ctx, profile, region, owner):
     ctx.obj["region"] = region
     ctx.obj["owner"] = owner
 
-
-# =========================
-# EC2 Commands
-# =========================
 @cli.group()
 @click.pass_context
 def ec2(ctx):
     """Manage EC2 instances"""
     pass
-
 
 @ec2.command()
 @click.pass_context
@@ -51,7 +39,6 @@ def list(ctx):
             inst_id = inst["InstanceId"]
             ip = inst.get("PublicIpAddress", "N/A")
             print(f"{inst_id} {state} {inst_type} {ip}")
-
 
 @ec2.command()
 @click.option("--type", default="t3.micro", help="Instance type")
@@ -83,7 +70,6 @@ def create(ctx, type, os):
     inst_id = resp["Instances"][0]["InstanceId"]
     print(f"Created {inst_id}")
 
-
 @ec2.command()
 @click.argument("instance_id")
 @click.pass_context
@@ -92,7 +78,6 @@ def stop(ctx, instance_id):
     ec2 = get_client("ec2", ctx.obj["profile"], ctx.obj["region"])
     ec2.stop_instances(InstanceIds=[instance_id])
     print(f"Stopped {instance_id}")
-
 
 @ec2.command()
 @click.argument("instance_id")
@@ -103,7 +88,6 @@ def start(ctx, instance_id):
     ec2.start_instances(InstanceIds=[instance_id])
     print(f"Started {instance_id}")
 
-
 @ec2.command()
 @click.argument("instance_id")
 @click.pass_context
@@ -113,16 +97,11 @@ def terminate(ctx, instance_id):
     ec2.terminate_instances(InstanceIds=[instance_id])
     print(f"Terminated {instance_id}")
 
-
-# =========================
-# S3 Commands
-# =========================
 @cli.group()
 @click.pass_context
 def s3(ctx):
     """Manage S3 buckets"""
     pass
-
 
 @s3.command()
 @click.option("--name", required=True, help="Bucket name")
@@ -143,7 +122,6 @@ def create(ctx, name):
     )
     print(f"bucket created: {bucket_name}")
 
-
 @s3.command()
 @click.pass_context
 def list(ctx):
@@ -152,7 +130,6 @@ def list(ctx):
     resp = s3.list_buckets()
     for b in resp["Buckets"]:
         print(b["Name"])
-
 
 @s3.command()
 @click.option("--name", required=True, help="Bucket name")
@@ -165,16 +142,11 @@ def upload(ctx, name, file):
     s3.upload_file(file, name, key)
     print(f"uploaded {file} to {name}")
 
-
-# =========================
-# Route53 Commands
-# =========================
 @cli.group()
 @click.pass_context
 def route53(ctx):
     """Manage Route53"""
     pass
-
 
 @route53.command()
 @click.option("--name", required=True, help="Domain name (e.g. example.com)")
@@ -193,7 +165,6 @@ def create_zone(ctx, name):
     zid = resp["HostedZone"]["Id"].split("/")[-1]
     print(f"{name} {zid}")
 
-
 @route53.command()
 @click.pass_context
 def list(ctx):
@@ -202,7 +173,6 @@ def list(ctx):
     resp = r53.list_hosted_zones()
     for z in resp["HostedZones"]:
         print(f"{z['Name']} {z['Id'].split('/')[-1]}")
-
 
 @route53.command()
 @click.option("--zone", required=True, help="Domain name")
@@ -228,7 +198,6 @@ def record(ctx, zone, action, type, name, value):
         rr["TTL"] = 300
         rr["ResourceRecords"] = [{"Value": value}]
 
-    # Translate "update" → "UPSERT"
     if action.lower() == "update":
         action = "UPSERT"
     else:

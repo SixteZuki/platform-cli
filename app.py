@@ -74,7 +74,7 @@ if service == "💻 EC2":
     st.divider()
 
     instance_id = st.text_input("Enter Instance ID for actions")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("▶️ Start Instance") and instance_id:
             ec2.start_instances(InstanceIds=[instance_id])
@@ -83,6 +83,11 @@ if service == "💻 EC2":
         if st.button("⏸️ Stop Instance") and instance_id:
             ec2.stop_instances(InstanceIds=[instance_id])
             st.warning(f"Stopped {instance_id}")
+    with col3:
+        if st.button("🗑️ Terminate Instance") and instance_id:
+            ec2.terminate_instances(InstanceIds=[instance_id])
+            st.error(f"Terminated {instance_id}")
+
 
 # ================= S3 =================
 elif service == "📦 S3":
